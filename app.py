@@ -25,8 +25,8 @@ st.markdown("""
 
 # دالة تنظيف البيانات قبل العرض لتفادي أخطاء Streamlit مع NaN
 def get_clean_df(df):
-    if df.empty:
-        return df
+    if df is None or df.empty:
+        return pd.DataFrame()
     return df.fillna("").astype(str)
 
 # --- 1. تهيئة قواعد البيانات الداخليّة (Session State) ---
@@ -64,6 +64,13 @@ def convert_df_to_excel(df):
         df.to_excel(writer, index=False, sheet_name='Data')
     return output.getvalue()
 
+# دالة لتجميع كافة الإدارات الموجودة في السيستم (من الماستر والبادجيت)
+def get_all_departments():
+    depts_master = st.session_state.master_df["الإدارة"].dropna().astype(str).unique().tolist() if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns else []
+    depts_budget = st.session_state.budget_df["الإدارة"].dropna().astype(str).unique().tolist() if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns else []
+    all_depts = sorted(list(set(depts_master + depts_budget)))
+    return [d for d in all_depts if d.strip() != ""]
+
 # --- القائمة الجانبية ---
 st.sidebar.title("🏢 نظام الـ HR الموحد")
 
@@ -82,6 +89,16 @@ if uploaded_file is not None:
             df_m.columns = df_m.columns.astype(str).str.strip()
             if "تاريخ التعيين" in df_m.columns:
                 df_m["تاريخ التعيين"] = pd.to_datetime(df_m["تاريخ التعيين"], errors='coerce').dt.date
+            
+            # عزل المستقيلين تلقائياً إذا كانت حالتهم محددة في الماستر
+            if "الحالة" in df_m.columns:
+                resigned_mask = df_m["الحالة"].astype(str).str.lower().isin(["resigned", "مستقيل", "استقالة"])
+                df_resigned = df_m[resigned_mask].copy()
+                if not df_resigned.empty:
+                    df_resigned["تاريخ الاستقالة"] = date.today()
+                    st.session_state.resignations_df = pd.concat([st.session_state.resignations_df, df_resigned], ignore_index=True).drop_duplicates(subset=["كود الموظف"], keep='last')
+                df_m = df_m[~resigned_mask]
+                
             st.session_state.master_df = df_m
             updated_sheets.append("الماستر (Master)")
 
@@ -108,7 +125,7 @@ if uploaded_file is not None:
                 df_r["تاريخ التعيين"] = pd.to_datetime(df_r["تاريخ التعيين"], errors='coerce').dt.date
             if "تاريخ الاستقالة" in df_r.columns:
                 df_r["تاريخ الاستقالة"] = pd.to_datetime(df_r["تاريخ الاستقالة"], errors='coerce').dt.date
-            st.session_state.resignations_df = df_r
+            st.session_state.resignations_df = pd.concat([st.session_state.resignations_df, df_r], ignore_index=True).drop_duplicates(subset=["كود الموظف"], keep='last')
             updated_sheets.append("الاستقالات (Resignations)")
 
         st.sidebar.success(f"تم رفع وتحديث: {', '.join(updated_sheets)}")
@@ -130,22 +147,21 @@ choice = st.sidebar.radio("اختر الشاشة:", menu)
 if choice == "📋 شيت الماستر (Master)":
     st.title("📋 إدارة بيانات الموظفين (المستند الرئيسي - Master)")
     
+    all_depts = get_all_departments()
+    
     with st.expander("➕ إضافة موظف جديد إلى الماستر", expanded=False):
-        available_depts = sorted(st.session_state.budget_df["الإدارة"].dropna().astype(str).unique().tolist()) if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns else []
-        
         c1, c2 = st.columns(2)
         code = c1.text_input("كود الموظف *")
         name = c2.text_input("الاسم بالكامل *")
         
         c3, c4 = st.columns(2)
-        selected_dept = c3.selectbox("الإدارة *", available_depts if available_depts else ["لا يوجد إدارات محددة"])
-        
-        if selected_dept and not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns and "الوظيفة" in st.session_state.budget_df.columns:
-            filtered_positions = sorted(st.session_state.budget_df[st.session_state.budget_df["الإدارة"] == selected_dept]["الوظيفة"].dropna().astype(str).unique().tolist())
+        dept_input = c3.selectbox("اختر الإدارة *", all_depts + ["إدارة جديدة..."])
+        if dept_input == "إدارة جديدة...":
+            selected_dept = st.text_input("أدخل اسم الإدارة الجديدة *")
         else:
-            filtered_positions = []
+            selected_dept = dept_input
             
-        selected_pos = c4.selectbox("الوظيفة (مقترنة بالإدارة) *", filtered_positions if filtered_positions else ["اختر الإدارة أولاً"])
+        selected_pos = c4.text_input("الوظيفة *")
         
         c5, c6 = st.columns(2)
         hiring_date = c5.date_input("تاريخ التعيين", value=date.today())
@@ -161,6 +177,12 @@ if choice == "📋 شيت الماستر (Master)":
                         "الوظيفة": selected_pos, "تاريخ التعيين": hiring_date, "الراتب": salary, "الحالة": "Active"
                     }
                     st.session_state.master_df = pd.concat([st.session_state.master_df, pd.DataFrame([new_emp])], ignore_index=True)
+                    
+                    # إضافة الوظيفة والإدارة تلقائياً للبادجيت إن لم تكن موجودة
+                    if st.session_state.budget_df.empty or not ((st.session_state.budget_df["الإدارة"] == selected_dept) & (st.session_state.budget_df["الوظيفة"] == selected_pos)).any():
+                        new_b = {"الإدارة": selected_dept, "الوظيفة": selected_pos, "الميزانية (Budget)": 1}
+                        st.session_state.budget_df = pd.concat([st.session_state.budget_df, pd.DataFrame([new_b])], ignore_index=True)
+                        
                     st.success(f"تم إضافة الموظف {name} بنجاح إلى شيت الماستر!")
                     st.rerun()
             else:
@@ -221,7 +243,7 @@ elif choice == "🏝️ شيت الإجازات (Vacations)":
                     st.success("تم تسجيل حركة الإجازة بنجاح!")
                     st.rerun()
         else:
-            st.warning("⚠️ يرجى التأكد من رفع شيت Master يحتوي على الأعمدة التالية: [كود الموظف، الاسم، الإدارة، الوظيفة].")
+            st.warning("⚠️ يرجى التأكد من أن شيت Master يضم موظفين حاليين ومكتمل البيانات.")
 
     st.subheader("📜 سجل الإجازات والحركات الكامل")
     st.dataframe(get_clean_df(st.session_state.vacations_df), use_container_width=True, hide_index=True)
@@ -263,7 +285,7 @@ elif choice == "🚪 شيت الاستقالات (Resignations)":
             st.success(f"تم نقل الموظف {emp_info['الاسم']} إلى شيت الاستقالات وحذفه من الماستر بنجاح!")
             st.rerun()
     else:
-        st.info("لا يوجد موظفين حاليين أو شيت الماستر ينقصه أعمدة أصلية.")
+        st.info("لا يوجد موظفين حاليين بالماستر لنقلهم للاستقالات.")
 
     st.subheader("📜 سجل الموظفين المستقيلين (Resignations Sheet)")
     st.dataframe(get_clean_df(st.session_state.resignations_df), use_container_width=True, hide_index=True)
@@ -275,22 +297,22 @@ elif choice == "🚪 شيت الاستقالات (Resignations)":
 elif choice == "🎯 شيت البادجيت (Budget)":
     st.title("🎯 الميزانية الشاغرة (Budget vs Actual)")
     
+    # دمج الماستر مع البادجيت لإظهار جميع الإدارات والوظائف حتى غير المدرجة في البادجيت
     if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns and "الوظيفة" in st.session_state.master_df.columns:
         master_counts = st.session_state.master_df.groupby(["الإدارة", "الوظيفة"]).size().reset_index(name="الفعلي (Actual)")
-        if "الإدارة" in st.session_state.budget_df.columns and "الوظيفة" in st.session_state.budget_df.columns:
-            budget_merged = pd.merge(st.session_state.budget_df, master_counts, on=["الإدارة", "الوظيفة"], how="left")
-        else:
-            budget_merged = st.session_state.budget_df.copy()
-            budget_merged["الفعلي (Actual)"] = 0
     else:
-        budget_merged = st.session_state.budget_df.copy()
-        budget_merged["الفعلي (Actual)"] = 0
-        
+        master_counts = pd.DataFrame(columns=["الإدارة", "الوظيفة", "الفعلي (Actual)"])
+
+    if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns and "الوظيفة" in st.session_state.budget_df.columns:
+        budget_merged = pd.merge(st.session_state.budget_df, master_counts, on=["الإدارة", "الوظيفة"], how="outer")
+    else:
+        budget_merged = master_counts.copy()
+        budget_merged["الميزانية (Budget)"] = 0
+
+    budget_merged["الميزانية (Budget)"] = budget_merged["الميزانية (Budget)"].fillna(0).astype(int)
     budget_merged["الفعلي (Actual)"] = budget_merged["الفعلي (Actual)"].fillna(0).astype(int)
-    if "الميزانية (Budget)" in budget_merged.columns:
-        budget_merged["الميزانية (Budget)"] = budget_merged["الميزانية (Budget)"].fillna(0).astype(int)
-        budget_merged["الشواغر (Vacancy)"] = budget_merged["الميزانية (Budget)"] - budget_merged["الفعلي (Actual)"]
-    
+    budget_merged["الشواغر (Vacancy)"] = budget_merged["الميزانية (Budget)"] - budget_merged["الفعلي (Actual)"]
+
     st.dataframe(get_clean_df(budget_merged), use_container_width=True, hide_index=True)
 
 # --- 5. الدايلى ريبورت ---
@@ -300,11 +322,11 @@ elif choice == "📊 التقرير اليومي (Daily Report)":
     report_date = st.date_input("🗓️ اختر تاريخ التقرير اليومي:", value=date.today())
     st.markdown(f"### 📈 تقرير حركة العمل يوم: `{report_date}`")
     
-    depts = sorted(st.session_state.budget_df["الإدارة"].dropna().astype(str).unique().tolist()) if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns else []
+    depts = get_all_departments()
     daily_summary = []
     
     for dept in depts:
-        dept_budget = st.session_state.budget_df[st.session_state.budget_df["الإدارة"] == dept]["الميزانية (Budget)"].sum() if "الميزانية (Budget)" in st.session_state.budget_df.columns else 0
+        dept_budget = st.session_state.budget_df[st.session_state.budget_df["الإدارة"] == dept]["الميزانية (Budget)"].sum() if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns and "الميزانية (Budget)" in st.session_state.budget_df.columns else 0
         dept_actual = len(st.session_state.master_df[st.session_state.master_df["الإدارة"] == dept]) if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns else 0
         variance = dept_budget - dept_actual
         
