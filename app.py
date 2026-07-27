@@ -2,9 +2,9 @@ import streamlit as st
 import pandas as pd
 from datetime import date, datetime
 
-st.set_page_config(page_title="نظام إدارة الموارد البشرية HR", page_icon="🏢", layout="wide")
+st.set_page_config(page_title="نظام إدارة الموارد البشرية HR - التقرير والبادجيت", page_icon="🏢", layout="wide")
 
-# CSS للتنسيق والدعم العربي
+# CSS للتنسيق والمظهر المحترف
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
@@ -23,365 +23,226 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-# دالة تنظيف البيانات قبل العرض لتفادي أخطاء Streamlit مع NaN
+# دالة تنظيف وتأمين البيانات لعدم حدوث أخطاء JSON
 def get_clean_df(df):
     if df is None or df.empty:
         return pd.DataFrame()
     return df.fillna("").astype(str)
 
-# --- 1. تهيئة قواعد البيانات الداخليّة (Session State) ---
+# --- قائمة الإدارات المعتمدة في الهيكل التوضيحي ---
+DEFAULT_DEPTS = [
+    "Executive Office", "Front Office", "Reservation", "Housekeeping", 
+    "Recreation", "Laundry", "Food & Beverage", "Kitchen", "Stewarding", 
+    "Finance", "Information Technology", "Human Resources", "Security", 
+    "Engineering", "Landscape", "Health & Safety", "Pest Control", 
+    "Sales & Marketing", "Quality"
+]
 
-if "budget_df" not in st.session_state:
-    st.session_state.budget_df = pd.DataFrame([
-        {"الإدارة": "الموارد البشرية", "الوظيفة": "أخصائي HR", "الميزانية (Budget)": 2},
-        {"الإدارة": "الموارد البشرية", "الوظيفة": "مدير موارد بشرية", "الميزانية (Budget)": 1},
-        {"الإدارة": "تكنولوجيا المعلومات", "الوظيفة": "مطور برمجيات", "الميزانية (Budget)": 3},
-        {"الإدارة": "تكنولوجيا المعلومات", "الوظيفة": "دعم فني IT", "الميزانية (Budget)": 2},
-        {"الإدارة": "العمليات", "الوظيفة": "خدمة عملاء", "الميزانية (Budget)": 5},
-        {"الإدارة": "العمليات", "الوظيفة": "مشرف عمليات", "الميزانية (Budget)": 2}
-    ])
+# --- 1. تهيئة قواعد البيانات (Session State) ---
 
 if "master_df" not in st.session_state:
     st.session_state.master_df = pd.DataFrame([
-        {"كود الموظف": "101", "الاسم": "أحمد محمود علي", "الإدارة": "الموارد البشرية", "الوظيفة": "أخصائي HR", "تاريخ التعيين": date(2025, 1, 15), "الراتب": 12000.0, "الحالة": "Active"},
-        {"كود الموظف": "102", "الاسم": "محمد مصطفى كامل", "الإدارة": "تكنولوجيا المعلومات", "الوظيفة": "مطور برمجيات", "تاريخ التعيين": date(2026, 7, 27), "الراتب": 18000.0, "الحالة": "Active"},
-        {"كود الموظف": "103", "الاسم": "سارة أحمد حسن", "الإدارة": "العمليات", "الوظيفة": "خدمة عملاء", "تاريخ التعيين": date(2024, 3, 10), "الراتب": 8000.0, "الحالة": "Active"}
+        {"كود الموظف": "101", "الاسم": "أحمد محمود علي", "الإدارة": "Executive Office", "الوظيفة": "Hotel Manager", "نوع التعيين": "Permenant", "تاريخ التعيين": date(2025, 1, 15), "الراتب": 12000.0, "الحالة": "Active"},
+        {"كود الموظف": "102", "الاسم": "محمد مصطفى كامل", "الإدارة": "Information Technology", "الوظيفة": "Director of Information Technology", "نوع التعيين": "Permenant", "تاريخ التعيين": date(2026, 7, 27), "الراتب": 18000.0, "الحالة": "Active"},
+        {"كود الموظف": "103", "الاسم": "سارة أحمد حسن", "الإدارة": "Housekeeping", "الوظيفة": "Executive Housekeeping", "نوع التعيين": "Permenant", "تاريخ التعيين": date(2024, 3, 10), "الراتب": 8000.0, "الحالة": "Active"}
+    ])
+
+if "budget_df" not in st.session_state:
+    # إعداد الهيكل المبدئي للبادجيت طبقاً للملف
+    st.session_state.budget_df = pd.DataFrame([
+        {"الإدارة": "Executive Office", "الوظيفة": "General Manager", "Target Budget": 0},
+        {"الإدارة": "Executive Office", "الوظيفة": "Hotel Manager", "Target Budget": 1},
+        {"الإدارة": "Executive Office", "الوظيفة": "Executive Assistant Manager", "Target Budget": 2},
+        {"الإدارة": "Front Office", "الوظيفة": "Front Office Manager", "Target Budget": 1},
+        {"الإدارة": "Front Office", "الوظيفة": "Guest Service Agent", "Target Budget": 3},
+        {"الإدارة": "Housekeeping", "الوظيفة": "Executive Housekeeping", "Target Budget": 1},
+        {"الإدارة": "Housekeeping", "الوظيفة": "Room Attendant", "Target Budget": 23},
+        {"الإدارة": "Information Technology", "الوظيفة": "Director of Information Technology", "Target Budget": 1},
+        {"الإدارة": "Information Technology", "الوظيفة": "IT Help Desk", "Target Budget": 2}
     ])
 
 if "vacations_df" not in st.session_state:
-    st.session_state.vacations_df = pd.DataFrame([
-        {"كود الموظف": "103", "الاسم": "سارة أحمد حسن", "الإدارة": "العمليات", "الوظيفة": "خدمة عملاء", "نوع الحركة": "إجازة", "من تاريخ": date(2026, 7, 27), "إلى تاريخ": date(2026, 7, 29), "عدد الأيام": 3}
-    ])
+    st.session_state.vacations_df = pd.DataFrame(columns=["كود الموظف", "الاسم", "الإدارة", "الوظيفة", "نوع الحركة", "من تاريخ", "إلى تاريخ", "عدد الأيام"])
 
 if "resignations_df" not in st.session_state:
     st.session_state.resignations_df = pd.DataFrame(columns=["كود الموظف", "الاسم", "الإدارة", "الوظيفة", "تاريخ التعيين", "تاريخ الاستقالة"])
 
-# دالة تحويل DataFrame لإكسيل
+# دالة تصدير لإكسيل
 def convert_df_to_excel(df):
     import io
     output = io.BytesIO()
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='Data')
+        df.to_excel(writer, index=False, sheet_name='Report')
     return output.getvalue()
 
-# دالة لتجميع كافة الإدارات الموجودة في السيستم (من الماستر والبادجيت)
-def get_all_departments():
-    depts_master = st.session_state.master_df["الإدارة"].dropna().astype(str).unique().tolist() if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns else []
-    depts_budget = st.session_state.budget_df["الإدارة"].dropna().astype(str).unique().tolist() if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns else []
-    all_depts = sorted(list(set(depts_master + depts_budget)))
-    return [d for d in all_depts if d.strip() != ""]
-
 # --- القائمة الجانبية ---
-st.sidebar.title("🏢 نظام الـ HR الموحد")
-
+st.sidebar.title("🏢 HR Daily & Budget System")
 st.sidebar.markdown("---")
-st.sidebar.subheader("📤 رفع بيانات السيستم المجمعة")
-uploaded_file = st.sidebar.file_uploader("ارفع ملف إكسيل الشامل (.xlsx)", type=["xlsx"])
 
+uploaded_file = st.sidebar.file_uploader("📤 رفع ملف السيستم المجمع (.xlsx)", type=["xlsx"])
 if uploaded_file is not None:
     try:
         excel_file = pd.ExcelFile(uploaded_file)
-        sheet_names = excel_file.sheet_names
-        
-        updated_sheets = []
-        if "Master" in sheet_names:
+        if "Master" in excel_file.sheet_names:
             df_m = pd.read_excel(uploaded_file, sheet_name="Master")
             df_m.columns = df_m.columns.astype(str).str.strip()
-            if "تاريخ التعيين" in df_m.columns:
-                df_m["تاريخ التعيين"] = pd.to_datetime(df_m["تاريخ التعيين"], errors='coerce').dt.date
-            
-            # عزل المستقيلين تلقائياً إذا كانت حالتهم محددة في الماستر
-            if "الحالة" in df_m.columns:
-                resigned_mask = df_m["الحالة"].astype(str).str.lower().isin(["resigned", "مستقيل", "استقالة"])
-                df_resigned = df_m[resigned_mask].copy()
-                if not df_resigned.empty:
-                    df_resigned["تاريخ الاستقالة"] = date.today()
-                    st.session_state.resignations_df = pd.concat([st.session_state.resignations_df, df_resigned], ignore_index=True).drop_duplicates(subset=["كود الموظف"], keep='last')
-                df_m = df_m[~resigned_mask]
-                
             st.session_state.master_df = df_m
-            updated_sheets.append("الماستر (Master)")
-
-        if "Budget" in sheet_names:
+        if "Budget" in excel_file.sheet_names:
             df_b = pd.read_excel(uploaded_file, sheet_name="Budget")
             df_b.columns = df_b.columns.astype(str).str.strip()
             st.session_state.budget_df = df_b
-            updated_sheets.append("البادجيت (Budget)")
-
-        if "Vacations" in sheet_names:
-            df_v = pd.read_excel(uploaded_file, sheet_name="Vacations")
-            df_v.columns = df_v.columns.astype(str).str.strip()
-            if "من تاريخ" in df_v.columns:
-                df_v["من تاريخ"] = pd.to_datetime(df_v["من تاريخ"], errors='coerce').dt.date
-            if "إلى تاريخ" in df_v.columns:
-                df_v["إلى تاريخ"] = pd.to_datetime(df_v["إلى تاريخ"], errors='coerce').dt.date
-            st.session_state.vacations_df = df_v
-            updated_sheets.append("الإجازات (Vacations)")
-
-        if "Resignations" in sheet_names:
-            df_r = pd.read_excel(uploaded_file, sheet_name="Resignations")
-            df_r.columns = df_r.columns.astype(str).str.strip()
-            if "تاريخ التعيين" in df_r.columns:
-                df_r["تاريخ التعيين"] = pd.to_datetime(df_r["تاريخ التعيين"], errors='coerce').dt.date
-            if "تاريخ الاستقالة" in df_r.columns:
-                df_r["تاريخ الاستقالة"] = pd.to_datetime(df_r["تاريخ الاستقالة"], errors='coerce').dt.date
-            st.session_state.resignations_df = pd.concat([st.session_state.resignations_df, df_r], ignore_index=True).drop_duplicates(subset=["كود الموظف"], keep='last')
-            updated_sheets.append("الاستقالات (Resignations)")
-
-        st.sidebar.success(f"تم رفع وتحديث: {', '.join(updated_sheets)}")
+        st.sidebar.success("تم تحديث كافة البيانات من الملف المرفوع!")
     except Exception as e:
-        st.sidebar.error(f"حدث خطأ أثناء قراءة الملف: {e}")
-
-st.sidebar.markdown("---")
+        st.sidebar.error(f"خطأ أثناء التحميل: {e}")
 
 menu = [
+    "📊 التقرير اليومي (Daily Report)",
+    "🎯 ميزانية العمالة (Budget Manpower)",
     "📋 شيت الماستر (Master)",
     "🏝️ شيت الإجازات (Vacations)",
-    "🚪 شيت الاستقالات (Resignations)",
-    "🎯 شيت البادجيت (Budget)",
-    "📊 التقرير اليومي (Daily Report)"
+    "🚪 شيت الاستقالات (Resignations)"
 ]
 choice = st.sidebar.radio("اختر الشاشة:", menu)
 
-# --- 1. شيت الماستر ---
-if choice == "📋 شيت الماستر (Master)":
-    st.title("📋 إدارة بيانات الموظفين (المستند الرئيسي - Master)")
+# --- 1. التقرير اليومي الشامل (Daily Report) المطابق للـ PDF ---
+if choice == "📊 التقرير اليومي (Daily Report)":
+    st.title("📊 Daily Report Sheet - Human Resources Department")
+    report_date = st.date_input("📅 Date:", value=date.today())
     
-    all_depts = get_all_departments()
+    # تحضير قائمة الإدارات
+    depts_in_master = st.session_state.master_df["الإدارة"].dropna().astype(str).unique().tolist() if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns else []
+    depts_in_budget = st.session_state.budget_df["الإدارة"].dropna().astype(str).unique().tolist() if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns else []
+    all_departments = list(dict.fromkeys(DEFAULT_DEPTS + depts_in_master + depts_in_budget))
     
-    with st.expander("➕ إضافة موظف جديد إلى الماستر", expanded=False):
-        c1, c2 = st.columns(2)
-        code = c1.text_input("كود الموظف *")
-        name = c2.text_input("الاسم بالكامل *")
-        
-        c3, c4 = st.columns(2)
-        dept_input = c3.selectbox("اختر الإدارة *", all_depts + ["إدارة جديدة..."])
-        if dept_input == "إدارة جديدة...":
-            selected_dept = st.text_input("أدخل اسم الإدارة الجديدة *")
+    daily_rows = []
+    
+    tot_mg, tot_task, tot_perm, tot_budget, tot_actual = 0, 0, 0, 0, 0
+    tot_vac, tot_tf_vac, tot_sick = 0, 0, 0
+
+    for dept in all_departments:
+        # حساب البادجيت Target من شيت البادجيت
+        if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns:
+            b_target = st.session_state.budget_df[st.session_state.budget_df["الإدارة"] == dept]["Target Budget"].sum() if "Target Budget" in st.session_state.budget_df.columns else 0
         else:
-            selected_dept = dept_input
+            b_target = 0
             
-        selected_pos = c4.text_input("الوظيفة *")
-        
-        c5, c6 = st.columns(2)
-        hiring_date = c5.date_input("تاريخ التعيين", value=date.today())
-        salary = c6.number_input("الراتب", min_value=0.0, step=500.0)
-        
-        if st.button("حفظ الموظف في الماستر"):
-            if code and name and selected_dept and selected_pos:
-                if "كود الموظف" in st.session_state.master_df.columns and str(code) in st.session_state.master_df["كود الموظف"].astype(str).values:
-                    st.error("⚠️ كود الموظف موجود بالفعل في الماستر!")
-                else:
-                    new_emp = {
-                        "كود الموظف": str(code), "الاسم": name, "الإدارة": selected_dept,
-                        "الوظيفة": selected_pos, "تاريخ التعيين": hiring_date, "الراتب": salary, "الحالة": "Active"
-                    }
-                    st.session_state.master_df = pd.concat([st.session_state.master_df, pd.DataFrame([new_emp])], ignore_index=True)
-                    
-                    # إضافة الوظيفة والإدارة تلقائياً للبادجيت إن لم تكن موجودة
-                    if st.session_state.budget_df.empty or not ((st.session_state.budget_df["الإدارة"] == selected_dept) & (st.session_state.budget_df["الوظيفة"] == selected_pos)).any():
-                        new_b = {"الإدارة": selected_dept, "الوظيفة": selected_pos, "الميزانية (Budget)": 1}
-                        st.session_state.budget_df = pd.concat([st.session_state.budget_df, pd.DataFrame([new_b])], ignore_index=True)
-                        
-                    st.success(f"تم إضافة الموظف {name} بنجاح إلى شيت الماستر!")
-                    st.rerun()
-            else:
-                st.warning("يرجى ملء جميع الحقول المطلوبة.")
-
-    st.subheader("👥 قائمة الموظفين الحاليين (Active Only)")
-    st.dataframe(get_clean_df(st.session_state.master_df), use_container_width=True, hide_index=True)
-    
-    excel_data = convert_df_to_excel(st.session_state.master_df)
-    st.download_button("📥 تحميل شيت الماستر (Excel)", data=excel_data, file_name="Master_Data.xlsx", mime="application/vnd.ms-excel")
-
-# --- 2. شيت الإجازات ---
-elif choice == "🏝️ شيت الإجازات (Vacations)":
-    st.title("🏝️ تسجيل وحركات الإجازات والغياب")
-    
-    with st.expander("➕ إضافة حركة جديدة لموظف", expanded=False):
-        required_cols = ["كود الموظف", "الاسم", "الإدارة", "الوظيفة"]
-        if not st.session_state.master_df.empty and all(col in st.session_state.master_df.columns for col in required_cols):
-            st.session_state.master_df["emp_label"] = (
-                st.session_state.master_df["كود الموظف"].astype(str) + " - " + 
-                st.session_state.master_df["الاسم"].astype(str) + " (" + 
-                st.session_state.master_df["الإدارة"].astype(str) + ")"
-            )
-            emp_options = st.session_state.master_df["emp_label"].tolist()
-            
-            selected_emp_label = st.selectbox("ابحث عن الموظف (بالكود أو الاسم):", emp_options)
-            
-            selected_code = selected_emp_label.split(" - ")[0]
-            emp_info = st.session_state.master_df[st.session_state.master_df["كود الموظف"].astype(str) == selected_code].iloc[0]
-            
-            st.info(f"👤 الموظف المختار: **{emp_info['الاسم']}** | الكود: **{emp_info['كود الموظف']}** | الإدارة: **{emp_info['الإدارة']}** | الوظيفة: **{emp_info['الوظيفة']}**")
-            
-            c1, c2, c3 = st.columns(3)
-            vac_type = c1.selectbox("نوع الحركة", ["إجازة", "مرضي", "غياب", "عارضة", "بدون أجر"])
-            from_date = c2.date_input("من تاريخ", value=date.today())
-            to_date = c3.date_input("إلى تاريخ", value=date.today())
-            
-            if to_date >= from_date:
-                days_count = (to_date - from_date).days + 1
-                st.caption(f"⏱️ إجمالي فترة الإجازة: **{days_count}** يوم/أيام")
-            else:
-                st.error("⚠️ تاريخ 'إلى' يجب أن يكون مساوياً أو بعد تاريخ 'من'")
-                days_count = 0
-            
-            if st.button("تسجيل الإجازة"):
-                if days_count > 0:
-                    new_vac = {
-                        "كود الموظف": str(selected_code),
-                        "الاسم": emp_info["الاسم"],
-                        "الإدارة": emp_info["الإدارة"],
-                        "الوظيفة": emp_info["الوظيفة"],
-                        "نوع الحركة": vac_type,
-                        "من تاريخ": from_date,
-                        "إلى تاريخ": to_date,
-                        "عدد الأيام": days_count
-                    }
-                    st.session_state.vacations_df = pd.concat([st.session_state.vacations_df, pd.DataFrame([new_vac])], ignore_index=True)
-                    st.success("تم تسجيل حركة الإجازة بنجاح!")
-                    st.rerun()
+        # الموظفين الحاليين في الماستر للإدارة
+        if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns:
+            dept_master = st.session_state.master_df[st.session_state.master_df["الإدارة"] == dept]
+            mg_count = len(dept_master[dept_master.get("نوع التعيين", "") == "MG"])
+            tf_count = len(dept_master[dept_master.get("نوع التعيين", "") == "Task Force"])
+            perm_count = len(dept_master[dept_master.get("نوع التعيين", "") == "Permenant"])
+            actual_count = len(dept_master)
         else:
-            st.warning("⚠️ يرجى التأكد من أن شيت Master يضم موظفين حاليين ومكتمل البيانات.")
-
-    st.subheader("📜 سجل الإجازات والحركات الكامل")
-    st.dataframe(get_clean_df(st.session_state.vacations_df), use_container_width=True, hide_index=True)
-    
-    excel_vac = convert_df_to_excel(st.session_state.vacations_df)
-    st.download_button("📥 تحميل شيت الإجازات (Excel)", data=excel_vac, file_name="Vacations_Data.xlsx", mime="application/vnd.ms-excel")
-
-# --- 3. شيت الاستقالات ---
-elif choice == "🚪 شيت الاستقالات (Resignations)":
-    st.title("🚪 تسجيل الاستقالات ونقل الموظفين")
-    
-    required_cols = ["كود الموظف", "الاسم", "الإدارة", "الوظيفة"]
-    if not st.session_state.master_df.empty and all(col in st.session_state.master_df.columns for col in required_cols):
-        st.session_state.master_df["emp_label_res"] = (
-            st.session_state.master_df["كود الموظف"].astype(str) + " - " + 
-            st.session_state.master_df["الاسم"].astype(str)
-        )
-        emp_res_options = st.session_state.master_df["emp_label_res"].tolist()
-        
-        selected_res_label = st.selectbox("ابحث عن الموظف المستقيل (بالكود أو الاسم):", emp_res_options)
-        selected_code = selected_res_label.split(" - ")[0]
-        emp_info = st.session_state.master_df[st.session_state.master_df["كود الموظف"].astype(str) == selected_code].iloc[0]
-        
-        st.warning(f"⚠️ بيانات الموظف المحدد: **{emp_info['الاسم']}** ({emp_info['الإدارة']} - {emp_info['الوظيفة']})")
-        res_date = st.date_input("تاريخ الاستقالة", value=date.today())
-        
-        if st.button("🚨 تأكيد الاستقالة ونقل الموظف"):
-            res_data = {
-                "كود الموظف": str(selected_code),
-                "الاسم": emp_info["الاسم"],
-                "الإدارة": emp_info["الإدارة"],
-                "الوظيفة": emp_info["الوظيفة"],
-                "تاريخ التعيين": emp_info.get("تاريخ التعيين", None),
-                "تاريخ الاستقالة": res_date
-            }
-            st.session_state.resignations_df = pd.concat([st.session_state.resignations_df, pd.DataFrame([res_data])], ignore_index=True)
-            st.session_state.master_df = st.session_state.master_df[st.session_state.master_df["كود الموظف"].astype(str) != selected_code]
+            mg_count = tf_count = perm_count = actual_count = 0
             
-            st.success(f"تم نقل الموظف {emp_info['الاسم']} إلى شيت الاستقالات وحذفه من الماستر بنجاح!")
-            st.rerun()
-    else:
-        st.info("لا يوجد موظفين حاليين بالماستر لنقلهم للاستقالات.")
-
-    st.subheader("📜 سجل الموظفين المستقيلين (Resignations Sheet)")
-    st.dataframe(get_clean_df(st.session_state.resignations_df), use_container_width=True, hide_index=True)
-    
-    excel_res = convert_df_to_excel(st.session_state.resignations_df)
-    st.download_button("📥 تحميل شيت الاستقالات (Excel)", data=excel_res, file_name="Resignations_Data.xlsx", mime="application/vnd.ms-excel")
-
-# --- 4. شيت البادجيت ---
-elif choice == "🎯 شيت البادجيت (Budget)":
-    st.title("🎯 الميزانية الشاغرة (Budget vs Actual)")
-    
-    # دمج الماستر مع البادجيت لإظهار جميع الإدارات والوظائف حتى غير المدرجة في البادجيت
-    if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns and "الوظيفة" in st.session_state.master_df.columns:
-        master_counts = st.session_state.master_df.groupby(["الإدارة", "الوظيفة"]).size().reset_index(name="الفعلي (Actual)")
-    else:
-        master_counts = pd.DataFrame(columns=["الإدارة", "الوظيفة", "الفعلي (Actual)"])
-
-    if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns and "الوظيفة" in st.session_state.budget_df.columns:
-        budget_merged = pd.merge(st.session_state.budget_df, master_counts, on=["الإدارة", "الوظيفة"], how="outer")
-    else:
-        budget_merged = master_counts.copy()
-        budget_merged["الميزانية (Budget)"] = 0
-
-    budget_merged["الميزانية (Budget)"] = budget_merged["الميزانية (Budget)"].fillna(0).astype(int)
-    budget_merged["الفعلي (Actual)"] = budget_merged["الفعلي (Actual)"].fillna(0).astype(int)
-    budget_merged["الشواغر (Vacancy)"] = budget_merged["الميزانية (Budget)"] - budget_merged["الفعلي (Actual)"]
-
-    st.dataframe(get_clean_df(budget_merged), use_container_width=True, hide_index=True)
-
-# --- 5. الدايلى ريبورت ---
-elif choice == "📊 التقرير اليومي (Daily Report)":
-    st.title("📊 التقرير اليومي الشامل (Daily Report)")
-    
-    report_date = st.date_input("🗓️ اختر تاريخ التقرير اليومي:", value=date.today())
-    st.markdown(f"### 📈 تقرير حركة العمل يوم: `{report_date}`")
-    
-    depts = get_all_departments()
-    daily_summary = []
-    
-    for dept in depts:
-        dept_budget = st.session_state.budget_df[st.session_state.budget_df["الإدارة"] == dept]["الميزانية (Budget)"].sum() if not st.session_state.budget_df.empty and "الإدارة" in st.session_state.budget_df.columns and "الميزانية (Budget)" in st.session_state.budget_df.columns else 0
-        dept_actual = len(st.session_state.master_df[st.session_state.master_df["الإدارة"] == dept]) if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns else 0
-        variance = dept_budget - dept_actual
-        
-        if not st.session_state.vacations_df.empty and all(col in st.session_state.vacations_df.columns for col in ["الإدارة", "من تاريخ", "إلى تاريخ", "نوع الحركة"]):
-            day_vacs = st.session_state.vacations_df[
+        # حساب الإجازات والغياب ليوم التقرير
+        if not st.session_state.vacations_df.empty and all(c in st.session_state.vacations_df.columns for c in ["الإدارة", "من تاريخ", "إلى تاريخ", "نوع الحركة"]):
+            dept_vacs = st.session_state.vacations_df[
                 (st.session_state.vacations_df["الإدارة"] == dept) & 
-                (st.session_state.vacations_df["من تاريخ"] <= report_date) & 
-                (st.session_state.vacations_df["إلى تاريخ"] >= report_date)
+                (pd.to_datetime(st.session_state.vacations_df["من تاريخ"]).dt.date <= report_date) & 
+                (pd.to_datetime(st.session_state.vacations_df["إلى تاريخ"]).dt.date >= report_date)
             ]
-            vac_count = len(day_vacs[day_vacs["نوع الحركة"].isin(["إجازة", "عارضة"])])
-            sick_count = len(day_vacs[day_vacs["نوع الحركة"] == "مرضي"])
-            absent_count = len(day_vacs[day_vacs["نوع الحركة"] == "غياب"])
+            vac_count = len(dept_vacs[dept_vacs["نوع الحركة"].isin(["إجازة", "عارضة"])])
+            sick_count = len(dept_vacs[dept_vacs["نوع الحركة"] == "مرضي"])
+            tf_vac_count = len(dept_vacs[dept_vacs["نوع الحركة"] == "Task Force Vac"])
         else:
-            vac_count = sick_count = absent_count = 0
+            vac_count = sick_count = tf_vac_count = 0
             
-        total_absent = vac_count + sick_count + absent_count
-        actual_operation = dept_actual - total_absent
-        vac_ratio = f"{round((total_absent / dept_actual * 100), 1)}%" if dept_actual > 0 else "0%"
-        
-        daily_summary.append({
-            "الإدارة": dept,
-            "الميزانية (Budget)": dept_budget,
-            "الفعلي (Actual)": dept_actual,
-            "الفرق (Variance)": variance,
-            "إجازة": vac_count,
-            "مرضي": sick_count,
-            "غياب": absent_count,
-            "الفعلي بالتشغيل (Operation)": actual_operation,
-            "نسبة الغياب/الإجازات": vac_ratio
+        pct_actual = f"{round((actual_count / b_target * 100))}%" if b_target > 0 else ("#DIV/0!" if actual_count == 0 else "100%")
+        pct_vacation = f"{round(((vac_count + sick_count) / actual_count * 100))}%" if actual_count > 0 else "0%"
+        total_operation = actual_count - (vac_count + sick_count)
+
+        # تجميع الإجماليات
+        tot_mg += mg_count
+        tot_task += tf_count
+        tot_perm += perm_count
+        tot_budget += b_target
+        tot_actual += actual_count
+        tot_vac += vac_count
+        tot_tf_vac += tf_vac_count
+        tot_sick += sick_count
+
+        daily_rows.append({
+            "Department": dept,
+            "MG": mg_count if mg_count > 0 else "",
+            "Task Force": tf_count if tf_count > 0 else "",
+            "Permenant": perm_count if perm_count > 0 else "",
+            "Total Budget": b_target,
+            "% Actual": pct_actual,
+            "Vacation": vac_count,
+            "Task Force Vac": tf_vac_count,
+            "Sick Leave": sick_count,
+            "% Vacation": pct_vacation,
+            "Total Operation": total_operation
         })
+
+    # إضافة صف الإجمالي (Total)
+    tot_pct_actual = f"{round((tot_actual / tot_budget * 100))}%" if tot_budget > 0 else "0%"
+    tot_pct_vac = f"{round(((tot_vac + tot_sick) / tot_actual * 100))}%" if tot_actual > 0 else "0%"
     
-    st.dataframe(get_clean_df(pd.DataFrame(daily_summary)), use_container_width=True, hide_index=True)
-    
+    daily_rows.append({
+        "Department": "TOTAL",
+        "MG": tot_mg,
+        "Task Force": tot_task,
+        "Permenant": tot_perm,
+        "Total Budget": tot_budget,
+        "% Actual": tot_pct_actual,
+        "Vacation": tot_vac,
+        "Task Force Vac": tot_tf_vac,
+        "Sick Leave": tot_sick,
+        "% Vacation": tot_pct_vac,
+        "Total Operation": tot_actual - (tot_vac + tot_sick)
+    })
+
+    df_daily_report = pd.DataFrame(daily_rows)
+    st.dataframe(get_clean_df(df_daily_report), use_container_width=True, hide_index=True)
+
     st.markdown("---")
-    
-    col_a, col_b = st.columns(2)
-    
-    with col_a:
-        st.subheader("🆕 التعيينات الجديدة (New Hiring)")
+    c1, c2 = st.columns(2)
+    with c1:
+        st.subheader("🆕 New Hiring Today")
         if not st.session_state.master_df.empty and "تاريخ التعيين" in st.session_state.master_df.columns:
-            new_hires = st.session_state.master_df[st.session_state.master_df["تاريخ التعيين"] == report_date]
-            if not new_hires.empty:
-                st.dataframe(get_clean_df(new_hires), use_container_width=True, hide_index=True)
-            else:
-                st.info("لا توجد تعيينات جديدة في هذا التاريخ.")
-        else:
-            st.info("لا توجد بيانات تعيينات.")
-            
-    with col_b:
-        st.subheader("🚪 الاستقالات (Resignations)")
+            nh = st.session_state.master_df[pd.to_datetime(st.session_state.master_df["تاريخ التعيين"]).dt.date == report_date]
+            st.dataframe(get_clean_df(nh), use_container_width=True, hide_index=True)
+    with c2:
+        st.subheader("🚪 Resignations Today")
         if not st.session_state.resignations_df.empty and "تاريخ الاستقالة" in st.session_state.resignations_df.columns:
-            res_today = st.session_state.resignations_df[st.session_state.resignations_df["تاريخ الاستقالة"] == report_date]
-            if not res_today.empty:
-                st.dataframe(get_clean_df(res_today), use_container_width=True, hide_index=True)
-            else:
-                st.info("لا توجد استقالات في هذا التاريخ.")
+            rs = st.session_state.resignations_df[pd.to_datetime(st.session_state.resignations_df["تاريخ الاستقالة"]).dt.date == report_date]
+            st.dataframe(get_clean_df(rs), use_container_width=True, hide_index=True)
+
+# --- 2. ميزانية العمالة والوظائف التفصيلية (Budget vs Actual) ---
+elif choice == "🎯 ميزانية العمالة (Budget Manpower)":
+    st.title("🎯 SAHL Hasheesh Manpower Budget vs Actual")
+
+    if not st.session_state.budget_df.empty:
+        # حساب الفعلي لكل وظيفة من الماستر
+        if not st.session_state.master_df.empty and "الإدارة" in st.session_state.master_df.columns and "الوظيفة" in st.session_state.master_df.columns:
+            act_counts = st.session_state.master_df.groupby(["الإدارة", "الوظيفة"]).size().reset_index(name="Actual")
+            b_merged = pd.merge(st.session_state.budget_df, act_counts, on=["الإدارة", "الوظيفة"], how="left")
         else:
-            st.info("لا توجد بيانات استقالات.")
+            b_merged = st.session_state.budget_df.copy()
+            b_merged["Actual"] = 0
+
+        b_merged["Target Budget"] = b_merged["Target Budget"].fillna(0).astype(int)
+        b_merged["Actual"] = b_merged["Actual"].fillna(0).astype(int)
+        b_merged["Diff"] = b_merged["Actual"] - b_merged["Target Budget"]
+
+        st.dataframe(get_clean_df(b_merged[["الإدارة", "الوظيفة", "Target Budget", "Actual", "Diff"]]), use_container_width=True, hide_index=True)
+    else:
+        st.info("لا توجد بيانات بادجيت مسجلة حالياً.")
+
+# --- 3. شيت الماستر الرئيسي ---
+elif choice == "📋 شيت الماستر (Master)":
+    st.title("📋 Master Employee List")
+    st.dataframe(get_clean_df(st.session_state.master_df), use_container_width=True, hide_index=True)
+
+# --- 4. شيت الإجازات ---
+elif choice == "🏝️ شيت الإجازات (Vacations)":
+    st.title("🏝️ Vacations & Attendance Movement")
+    st.dataframe(get_clean_df(st.session_state.vacations_df), use_container_width=True, hide_index=True)
+
+# --- 5. شيت الاستقالات ---
+elif choice == "🚪 شيت الاستقالات (Resignations)":
+    st.title("🚪 Resignations & Terminated List")
+    st.dataframe(get_clean_df(st.session_state.resignations_df), use_container_width=True, hide_index=True)
