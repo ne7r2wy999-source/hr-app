@@ -1,136 +1,208 @@
-import streamlit as st
+import os
+import json
 import pandas as pd
-from datetime import date
+from PIL import Image
+from openpyxl import Workbook
+import streamlit as st
+import google.generativeai as genai
 
-st.set_page_config(page_title="HR Operational System", page_icon="📊", layout="wide")
+# --- 1. إعداد الصفحة والتنسيق ---
+st.set_page_config(page_title="نظام الأرشيف الذكي - HR Archive", page_icon="📁", layout="wide")
 
-# CSS بسيط للاتجاه والتنسيق
 st.markdown("""
     <style>
     @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800&display=swap');
     html, body, [class*="css"] { font-family: 'Cairo', sans-serif; direction: rtl; text-align: right; }
-    .stButton>button { width: 100%; font-weight: bold; background-color: #1f77b4; color: white; }
+    .stButton>button { width: 100%; font-weight: bold; background-color: #28a745; color: white; }
     </style>
 """, unsafe_allow_html=True)
 
-# تهيئة الـ Session State
-if "master_df" not in st.session_state:
-    st.session_state.master_df = pd.DataFrame()
-if "budget_df" not in st.session_state:
-    st.session_state.budget_df = pd.DataFrame()
-if "vacations_df" not in st.session_state:
-    st.session_state.vacations_df = pd.DataFrame()
-if "resignations_df" not in st.session_state:
-    st.session_state.resignations_df = pd.DataFrame()
+# --- 2. إعداد مسارات الأرشيف وشيت الإكسيل ---
+ARCHIVE_DIR = "./Employees_Archive"
+EXCEL_PATH = "./HR_Master_Database.xlsx"
+os.makedirs(ARCHIVE_DIR, exist_ok=True)
 
-# القائمة الجانبية
-st.sidebar.title("📁 التحكم والرفع")
-uploaded_file = st.sidebar.file_uploader("رفع ملف الإكسيل الأصلي (.xlsx)", type=["xlsx"])
-
-if uploaded_file is not None:
-    try:
-        excel_file = pd.ExcelFile(uploaded_file)
-        sheets = excel_file.sheet_names
-        
-        # قراءة الشيتات بدون تعديل أي اسم عمود اطلاقاً
-        for sheet in sheets:
-            s_clean = sheet.strip().lower()
-            if 'master' in s_clean:
-                st.session_state.master_df = pd.read_excel(uploaded_file, sheet_name=sheet)
-            elif 'budget' in s_clean:
-                st.session_state.budget_df = pd.read_excel(uploaded_file, sheet_name=sheet)
-            elif 'vacation' in s_clean or 'إجازات' in s_clean or 'leave' in s_clean:
-                st.session_state.vacations_df = pd.read_excel(uploaded_file, sheet_name=sheet)
-            elif 'resignation' in s_clean or 'استقالات' in s_clean:
-                st.session_state.resignations_df = pd.read_excel(uploaded_file, sheet_name=sheet)
-
-        st.sidebar.success("✅ تم تحميل الملف بنفس أسماء الأعمدة والشيتات الأصلية!")
-    except Exception as e:
-        st.sidebar.error(f"خطأ أثناء قراءة الملف: {e}")
-
-st.sidebar.markdown("---")
-menu = [
-    "📊 الدايلى ريبورت (Daily Report)",
-    "➕ إضافة تعيين جديد",
-    "🏝️ تسجيل إجازة",
-    "🚪 تسجيل استقالة",
-    "🎯 شيت البادجيت (Budget)",
-    "📋 شيت الماستر (Master)"
+HEADERS = [
+    "Emp Code", "Employee Name", "National ID", "DOB", "Job Title", 
+    "National ID Expiry", "Qualification", "Military Status", 
+    "Insurance No", "Health Cert Expiry", "Folder Path"
 ]
-choice = st.sidebar.radio("اختر القائمة:", menu)
 
-# --- 1. الدايلى ريبورت ---
-if choice == "📊 الدايلى ريبورت (Daily Report)":
-    st.title("📊 HR Daily Report")
-    selected_date = st.date_input("تاريخ التقرير:", value=date.today())
+if not os.path.exists(EXCEL_PATH):
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Master Data"
+    ws.append(HEADERS)
+    wb.save(EXCEL_PATH)
+
+# --- 3. الدوال الأساسية ---
+
+def generate_next_emp_code():
+    """توليد كود موظف جديد تلقائياً (EMP-001, EMP-002...)"""
+    if not os.path.exists(EXCEL_PATH):
+        return "EMP-001"
+    df = pd.read_excel(EXCEL_PATH)
+    if df.empty or "Emp Code" not in df.columns:
+        return "EMP-001"
     
-    if st.session_state.master_df.empty and st.session_state.budget_df.empty:
-        st.info("👈 يرجى رفع ملف الإكسيل من القائمة الجانبية لعرض التقرير ببياناتك الأصلية.")
-    else:
-        # البحث عن عمود الإدارة من الأعمدة الحقيقية الموجودة في الملف
-        master_cols = st.session_state.master_df.columns.tolist() if not st.session_state.master_df.empty else []
-        budget_cols = st.session_state.budget_df.columns.tolist() if not st.session_state.budget_df.empty else []
-        
-        dept_col_m = next((c for c in master_cols if 'dept' in str(c).lower() or 'إدارة' in str(c).lower() or 'department' in str(c).lower()), master_cols[0] if master_cols else None)
-        dept_col_b = next((c for c in budget_cols if 'dept' in str(c).lower() or 'إدارة' in str(c).lower() or 'department' in str(c).lower()), budget_cols[0] if budget_cols else None)
-        
-        depts_m = st.session_state.master_df[dept_col_m].dropna().unique().tolist() if dept_col_m else []
-        depts_b = st.session_state.budget_df[dept_col_b].dropna().unique().tolist() if dept_col_b else []
-        all_depts = sorted(list(set(depts_m + depts_b)))
+    existing_codes = df["Emp Code"].dropna().astype(str).tolist()
+    numbers = []
+    for code in existing_codes:
+        if code.startswith("EMP-"):
+            try:
+                numbers.append(int(code.split("-")[1]))
+            except:
+                pass
+    next_num = max(numbers) + 1 if numbers else 1
+    return f"EMP-{next_num:03d}"
 
-        # تجميع البيانات بنفس الأعمدة المطلوبة للتقرير اليومي
-        daily_rows = []
-        for d in all_depts:
-            # حساب الفعلي من الماستر
-            act_count = 0
-            if dept_col_m:
-                act_count = len(st.session_state.master_df[st.session_state.master_df[dept_col_m] == d])
+def analyze_doc_with_ai(image_obj, api_key):
+    """تحليل الوثيقة واستخراج نوعها والبيانات بالذكاء الاصطناعي"""
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel('gemini-1.5-flash')
+    
+    prompt = """
+    أنت خبير أرشيف HR مصري. قم بمسح الوثيقة واستخراج البيانات بنص JSON حصراً وبدون أي مقدمات أو شرح:
+    1. حدد نوع الوثيقة من القائمة: 
+       ["National_ID", "Birth_Certificate", "Qualification", "Military_Certificate", "Insurance_Print", "Work_Permit", "Criminal_Record", "Health_Certificate", "Skill_Certificate", "Syndicate_Card"]
+    
+    2. أرجع النتيجة في JSON فقط بالشكل التالي:
+    {
+       "doc_type_code": "كود الوثيقة بالإنجليزية من القائمة أعلاه",
+       "doc_type_arabic": "اسم الوثيقة بالعربي",
+       "employee_name": "اسم الموظف إن وجد",
+       "national_id": "الرقم القومي (14 رقم) إن وجد",
+       "dob": "تاريخ الميلاد YYYY-MM-DD إن وجد",
+       "job_title": "المهنة / الوظيفة إن وجد",
+       "expiry_date": "تاريخ الانتهاء YYYY-MM-DD إن وجد",
+       "military_status": "الموقف من التجنيد إن وجد",
+       "qualification": "المؤهل الدراسي إن وجد",
+       "insurance_no": "الرقم التأميني إن وجد"
+    }
+    """
+    
+    response = model.generate_content([prompt, image_obj])
+    clean_json = response.text.replace("```json", "").replace("```", "").strip()
+    return json.loads(clean_json)
+
+def save_employee_data(emp_code, extracted_results):
+    """حفظ البيانات في شيت الإكسيل وتحديث صف الموظف"""
+    df = pd.read_excel(EXCEL_PATH)
+    emp_folder = os.path.join(ARCHIVE_DIR, emp_code)
+    
+    # تحضير صف الموظف
+    row_data = {col: "" for col in HEADERS}
+    row_data["Emp Code"] = emp_code
+    row_data["Folder Path"] = emp_folder
+    
+    # دمج بيانات الوثائق المرفوعة
+    for res in extracted_results:
+        data = res["data"]
+        if data.get("employee_name") and not row_data["Employee Name"]:
+            row_data["Employee Name"] = data["employee_name"]
+        if data.get("national_id") and not row_data["National ID"]:
+            row_data["National ID"] = str(data["national_id"])
+        if data.get("dob") and not row_data["DOB"]:
+            row_data["DOB"] = data["dob"]
+        if data.get("job_title") and not row_data["Job Title"]:
+            row_data["Job Title"] = data["job_title"]
+        if data.get("qualification") and not row_data["Qualification"]:
+            row_data["Qualification"] = data["qualification"]
+        if data.get("military_status") and not row_data["Military Status"]:
+            row_data["Military Status"] = data["military_status"]
+        if data.get("insurance_no") and not row_data["Insurance No"]:
+            row_data["Insurance No"] = str(data["insurance_no"])
             
-            # حساب البادجيت
-            bud_val = 0
-            if dept_col_b:
-                bud_col_target = next((c for c in budget_cols if 'budget' in str(c).lower() or 'ميزانية' in str(c).lower() or 'target' in str(c).lower()), None)
-                if bud_col_target:
-                    bud_val = pd.to_numeric(st.session_state.budget_df[st.session_state.budget_df[dept_col_b] == d][bud_col_target], errors='coerce').sum()
+        if data.get("doc_type_code") == "National_ID":
+            row_data["National ID Expiry"] = data.get("expiry_date", "")
+        elif data.get("doc_type_code") == "Health_Certificate":
+            row_data["Health Cert Expiry"] = data.get("expiry_date", "")
 
-            pct_act = f"{int(round((act_count / bud_val) * 100))}%" if bud_val > 0 else "0%"
+    # إدراج الصف في الإكسيل
+    if emp_code in df["Emp Code"].astype(str).values:
+        idx = df[df["Emp Code"].astype(str) == emp_code].index[0]
+        for key, val in row_data.items():
+            if val:
+                df.at[idx, key] = val
+    else:
+        df = pd.concat([df, pd.DataFrame([row_data])], ignore_index=True)
+        
+    df.to_excel(EXCEL_PATH, index=False)
 
-            daily_rows.append({
-                "Department": d,
-                "Actual Total": act_count,
-                "Total Budget": int(bud_val),
-                "% Actual": pct_act
-            })
+# --- 4. واجهة المستخدم (Streamlit UI) ---
 
-        df_daily = pd.DataFrame(daily_rows)
-        st.dataframe(df_daily, use_container_width=True, hide_index=True)
+st.title("📁 نظام الأرشيف الرقمي وإدخال بيانات مسوغات التعيين")
 
-# --- 2. باقي الشاشات لعرض الشيتات الخام كما هي بالظبط ---
-elif choice == "🎯 شيت البادجيت (Budget)":
-    st.title("🎯 شيت البادجيت الأصلي")
-    st.dataframe(st.session_state.budget_df, use_container_width=True, hide_index=True)
+# المفتاح البرمجي
+api_key = st.sidebar.text_input("أدخل مفتاح Gemini API Key:", type="password")
+st.sidebar.markdown("---")
 
-elif choice == "📋 شيت الماستر (Master)":
-    st.title("📋 شيت الماستر الأصلي")
-    st.dataframe(st.session_state.master_df, use_container_width=True, hide_index=True)
+tab1, tab2 = st.tabs(["📸 مسح أوراق موظف جديد", "📊 عرض شيت الإكسيل الأرشيفي"])
 
-elif choice == "➕ إضافة تعيين جديد":
-    st.title("➕ إضافة موظف إلى شيت الماستر")
-    if not st.session_state.master_df.empty:
-        cols = st.session_state.master_df.columns
-        with st.form("add_form"):
-            inputs = {}
-            for col in cols:
-                inputs[col] = st.text_input(f"{col}")
-            submit = st.form_submit_button("حفظ الموظف")
-            if submit:
-                st.session_state.master_df = pd.concat([st.session_state.master_df, pd.DataFrame([inputs])], ignore_index=True)
-                st.success("تم التحديث في شيت الماستر بنجاح!")
+with tab1:
+    col_code, col_info = st.columns([1, 2])
+    with col_code:
+        emp_code = st.text_input("كود الموظف:", value=generate_next_emp_code())
+    
+    st.info(f"سيتم إنشاء فولدر خاص بهذا الموظف بالمسمى: `{ARCHIVE_DIR}/{emp_code}`")
+    
+    uploaded_files = st.file_uploader(
+        "اسحب أو التقط صور/وثائق الموظف (يمكنك رفع عدة ملفات معاً):", 
+        type=["jpg", "jpeg", "png"], 
+        accept_multiple_files=True
+    )
+    
+    if st.button("🚀 معالجة الوثائق وحفظ الأرشيف"):
+        if not api_key:
+            st.error("يرجى إدخال Gemini API Key في القائمة الجانبية أولاً!")
+        elif not uploaded_files:
+            st.warning("يرجى اختيار أو التقاط صورة وثيقة واحدة على الأقل!")
+        else:
+            emp_folder = os.path.join(ARCHIVE_DIR, emp_code)
+            os.makedirs(emp_folder, exist_ok=True)
+            
+            extracted_results = []
+            
+            with st.spinner("جاري تحليل الوثائق وتسميتها بالذكاء الاصطناعي..."):
+                for uploaded_file in uploaded_files:
+                    image = Image.open(uploaded_file)
+                    try:
+                        # 1. تحليل الصورة
+                        doc_info = analyze_doc_with_ai(image, api_key)
+                        
+                        # 2. تحديد اسم الملف والحفظ في الفولدر
+                        doc_code = doc_info.get("doc_type_code", "Document")
+                        file_ext = uploaded_file.name.split(".")[-1]
+                        save_filename = f"{doc_code}.{file_ext}"
+                        save_path = os.path.join(emp_folder, save_filename)
+                        
+                        image.save(save_path)
+                        
+                        extracted_results.append({
+                            "filename": save_filename,
+                            "data": doc_info
+                        })
+                        st.success(f"✅ تم التعرف على: **{doc_info.get('doc_type_arabic', doc_code)}** وحفظها كـ `{save_filename}`")
+                    except Exception as e:
+                        st.error(f"خطأ أثناء معالجة الملف {uploaded_file.name}: {e}")
 
-elif choice == "🏝️ تسجيل إجازة":
-    st.title("🏝️ شيت الإجازات")
-    st.dataframe(st.session_state.vacations_df, use_container_width=True, hide_index=True)
+            # 3. تحديث شيت الإكسيل
+            if extracted_results:
+                save_employee_data(emp_code, extracted_results)
+                st.balloons()
+                st.success(f"🎉 تم تسجيل الموظف **{emp_code}** بنجاح وتحديث شيت الإكسيل Main Database!")
 
-elif choice == "🚪 تسجيل استقالة":
-    st.title("🚪 شيت الاستقالات")
-    st.dataframe(st.session_state.resignations_df, use_container_width=True, hide_index=True)
+with tab2:
+    st.subheader("📊 بيانات الموظفين المسجلة في شيت الإكسيل")
+    if os.path.exists(EXCEL_PATH):
+        df_master = pd.read_excel(EXCEL_PATH)
+        st.dataframe(df_master, use_container_width=True)
+        
+        # زر تحميل شيت الإكسيل
+        with open(EXCEL_PATH, "rb") as file:
+            st.download_button(
+                label="📥 تحميل ملف الإكسيل (HR_Master_Database.xlsx)",
+                data=file,
+                file_name="HR_Master_Database.xlsx",
+                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
